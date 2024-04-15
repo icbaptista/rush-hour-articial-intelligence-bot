@@ -1,0 +1,21 @@
+####################################### Experimentation ############################################
+                print('Next cycle')
+                #print(state)
+                #print(state.get("cursor"))
+
+                # This works to solve level 1
+                #car = 'A'
+                #if state["selected"] == '':
+                #    print("Car not selected")
+                #    if state["cursor"][0]  != occupiedCoord[1][0]: # X Axis
+                #        print("Cursor is not in car ")
+                #        key = moveCursorToCarXAxis(state["cursor"], occupiedCoord) # function to take cursor to car
+                #    elif state["cursor"][1] != occupiedCoord[1][1]: # Y Axis
+                #        print("Cursor is not in car ")
+                #        key = moveCursorToCarYAxis(state["cursor"], occupiedCoord) # function to take cursor to car
+                #    else: 
+                #        key = " "
+                #        state["selected"] = 'A'
+                #else: 
+                #    key = "d" 
+                ######################################### Experimentation ############################################                   

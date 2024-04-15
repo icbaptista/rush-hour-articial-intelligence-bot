@@ -1,0 +1,247 @@
+
+
+# Next 4 lines are not needed for AI agents, please remove them from your code!
+import queue
+import pygame
+import websockets
+from common import Coordinates, Map, MapException
+import asyncio
+
+class SearchNode:
+    def __init__(self, map, parent = None, depth = 0, cost = 0): 
+        self.state = map                                                                                         # object representation of the board
+        self.grid = turnGridIntoString(map.grid)                                                                 # string representation of the board
+        self.parent = parent                                                                                     # parent node
+        self.depth = depth
+        self.path =  ""                                                                                          # path to exit                            
+        self.cost = cost                                                                                         # cost of the action taken
+        self.redCarPos = [(pos[0], pos[1]) for pos in self.state.coordinates if pos[2] == 'A']                   # red car position
+        self.heuristic = self.heuristic_calculator()                                                             # calculating heuristic
+        self.allStates = []                                                         
+
+    def __str__(self):
+        pretty_grid(self.state.grid)
+        return ""
+    
+    def __repr__(self):
+        return str(self)
+    
+    def __lt__(self, other):                                                                                     # less than (comparing objects)
+        return (self.heuristic < other.heuristic) 
+
+    def heuristic_calculator(self): 
+        # heuristic = distance to exit (maybe we will use pytogoras theorem in the future) + numbers of cars blocking the exit
+        distanceToExit = self.state.grid_size - (self.redCarPos[0][0] + 1)                                       # distance to exit
+        blockingCars = len([pos for pos in self.state.coordinates if pos[1] == self.redCarPos[0][1]]) / 2        # number of cars blocking the exit for red car 
+        return distanceToExit + blockingCars
+
+class Search: 
+    def __init__(self, map):
+        self.init = SearchNode(map, None)                                                            # initial configuration
+        self.open_nodes = [self.init]                                                                # list of unexplored states, placed in a queue        self.visited = {}                                                                         # list of explored states to not explore again                                                          
+        self.visited = {}                                                                           # list of explored states to not explore again      
+        self.cars = [spot[2] for spot in map.coordinates]                                           
+        self.everyCar = [i for n, i in enumerate(self.cars) if i not in self.cars[:n] and i != 'x']  # list of all the cars    
+        #self.everyCar = list(reversed(self.everyCar))                                                # reversing the list might be better for optimization
+        self.solution = ""
+        self.solutionPath = ""
+        self.init.allStates = [turnGridIntoString(self.init.state.grid)]
+        self.cost_so_far = {}
+        self.cost_so_far[self.init] = float('inf')
+        self.init.cost = 100
+        self.init.selectedCar = 'A'
+        self.strategy = "A*"
+
+    def searchFunction(self):
+        self.visited[self.init.grid] = self.init.cost
+
+        while self.open_nodes != []:
+            current = self.open_nodes.pop(0)
+            print("****************************************************Next cycle*******************************************************")
+            print("\nVisiting Node")
+            pretty_grid(current.state.grid)
+            print(f"Node path: {current.path}")
+
+            #print(self.open_nodes.queue) -> Existem muitos nós com a mesma heurística a ser guardados, é preciso aumentar o pruning
+
+            if self.goalReached(current.state):
+                print("\nFound solution!")
+                print(self.solution)
+                pretty_grid(current.state.grid)
+                print("Total steps: ", current.depth)
+                print("Total states explored: ", len(self.visited))
+                self.solution = current.state.grid
+                self.solutionPath = current.path
+                return self.solutionPath, current.allStates
+            else: 
+                next_states = self.generate_next_moves(current)                     # generating new configurations with new moves
+                print("\nChildren\n")
+                lnewnodes = []
+                for next in next_states:                                            # iterating new configurations to see the best configuration)
+                    new_cost = current.cost + self.distance_to_parent(next)
+                    if next not in self.visited.keys():
+                        pretty_grid(next.state.grid)
+                        print(f"Path to this node: {next.path}")
+                        print(f"Heuristic: {next.heuristic}")
+                        next.cost = new_cost
+                        self.visited[next.grid] = new_cost
+                        lnewnodes.append(next)
+                   
+                self.add_to_open(lnewnodes)
+            print("*********************************************************************************************************************")
+
+        return None
+
+    def remove_from_open_and_visited(self, node):
+        for n in self.open_nodes:
+            if n.state.grid == node.state.grid:
+                self.open_nodes.remove(n)
+                break
+
+    def distance_to_parent(self, current):
+        parentCar = current.parent.selectedCar 
+        currentCar = current.selectedCar
+        parentCord = current.state.piece_coordinates(parentCar)
+        currentCord = current.state.piece_coordinates(currentCar)
+        return abs(parentCord[0].x - currentCord[0].x) + abs(parentCord[0].y - currentCord[0].y)
+
+    # juntar novos nos a lista de nos abertos de acordo com a estrategia
+    def add_to_open(self,lnewnodes):
+        if self.strategy == 'breadth':
+            self.open_nodes.extend(lnewnodes)
+        elif self.strategy == 'depth':
+            self.open_nodes[:0] = lnewnodes
+        elif self.strategy == 'uniform':
+            self.open_nodes.extend(lnewnodes) #adicionar
+            self.open_nodes.sort(key=lambda n: n.cost) #fazer sort por ordem crescente por causa do menor custo
+        elif self.strategy == 'greedy':
+            self.open_nodes.extend(lnewnodes)
+            self.open_nodes.sort(key= lambda n: n.heuristic)
+        elif self.strategy == 'A*':
+            self.open_nodes.extend(lnewnodes)
+            self.open_nodes.sort(key= lambda n: n.cost + n.heuristic)
+
+    # generating new configurations with new moves (each node/vertex in the search)          
+    def generate_next_moves(self, current):
+        #print("\nGenerating New Moves")
+        next_moves = []
+        for car in self.everyCar:                                                                       # we need to generate new moves for every car 
+            positions = current.state.piece_coordinates(car)                                            # we need to move in both directions if possible 
+            if (self.is_horizontal(positions)):                                                         # checking if a car moves horizontally 
+                new_coord = Coordinates(positions[0].x - 1, positions[0].y) 
+                if (self.can_move_left(new_coord, current.state)):                                      # checking if a car can move to the left                                                                                  
+                    new_map = Map(current.state.__repr__())                                             # creating a new map for the new node 
+                    direction_vector = Coordinates(-1,0)                                                
+                    new_map.move(car, direction_vector)                                                 # moving car along a direction vector    
+                    new_node = SearchNode(new_map, current)                                             # creating a new state for searching 
+                    new_node.path = current.path + car + "a"
+                    new_node.depth = current.depth + 1
+                    new_node.selectedCar = car
+                    new_node.allStates = current.allStates + [turnGridIntoString(new_node.state.grid)]
+                    next_moves.append(new_node)                                                        
+                new_coord = Coordinates(positions[-1].x + 1, positions[-1].y)   
+                if (self.can_move_right(new_coord, current.state)):                                     # checking if a car can move to the left 
+                    new_map = Map(current.state.__repr__())                                             # creating a new map for the new node 
+                    direction_vector = Coordinates(1,0)                                                
+                    new_map.move(car, direction_vector)                                                 # moving car along a direction vector    
+                    new_node = SearchNode(new_map, current)                                             # creating a new state for searching 
+                    new_node.path = current.path + car + "d"
+                    new_node.depth = current.depth + 1
+                    new_node.selectedCar = car
+                    new_node.allStates = current.allStates + [turnGridIntoString(new_node.state.grid)]
+                    next_moves.append(new_node)                                                                            
+            elif (self.is_vertical(positions)):                                                         # checking if a car moves vertically 
+                new_coord = Coordinates(positions[0].x , positions[0].y - 1) 
+                if (self.can_move_up(new_coord, current.state)):                                        # checking if a car can move to the top of the grid 
+                    new_map = Map(current.state.__repr__())                                             # creating a new map for the new node 
+                    direction_vector = Coordinates(0,-1)                                                
+                    new_map.move(car, direction_vector)                                                 # moving car along a direction vector    
+                    new_node = SearchNode(new_map, current)                                             # creating a new state for searching 
+                    new_node.path = current.path + car + "w"
+                    new_node.depth = current.depth + 1
+                    new_node.selectedCar = car
+                    new_node.allStates = current.allStates + [turnGridIntoString(new_node.state.grid)]
+                    next_moves.append(new_node)                                                                           
+                new_coord = Coordinates(positions[-1].x, positions[-1].y + 1) 
+                if (self.can_move_down(new_coord, current.state)):                                      # checking if a car can move to the bottom of the grid  
+                    new_map = Map(current.state.__repr__())                                             # creating a new map for the new node 
+                    direction_vector = Coordinates(0, 1)                                                
+                    new_map.move(car, direction_vector)                                                 # moving car along a direction vector    
+                    new_node = SearchNode(new_map, current)                                             # creating a new state for searching 
+                    new_node.path = current.path + car + "s"
+                    new_node.depth = current.depth + 1
+                    new_node.selectedCar = car
+                    new_node.allStates = current.allStates + [turnGridIntoString(new_node.state.grid)]
+                    next_moves.append(new_node)                                                                            
+        return next_moves
+
+    # Checking if a car moves horizontally 
+    def is_horizontal(self, positions): 
+        if positions[0].y == positions[1].y:
+            return True
+        else :
+            return False 
+
+    # Checking if a car moves vertically
+    def is_vertical(self, positions): 
+        if positions[0].x == positions[1].x:
+            return True
+        else :
+            return False    
+
+    # Checking if a car can move to the left
+    def can_move_left(self, new_coord, current):
+        if (new_coord.x != -1):                                                                 # checking if car is next to the wall 
+            if (not self.is_there_an_obstacle(new_coord, current)):
+                return True
+        else: 
+            return False 
+
+    # Checking if a car can move to the right
+    def can_move_right(self, new_coord, current):
+        if (new_coord.x != current.grid_size):                                            # checking if car is next to the wall 
+            if (not self.is_there_an_obstacle(new_coord, current)):
+                return True
+        else: 
+            return False       
+
+    # Checking if a car can move to the top of the grid
+    def can_move_up(self, new_coord, current):
+        if (new_coord.y != -1):                                                                 # checking if car is next to the wall 
+            if (not self.is_there_an_obstacle(new_coord, current)):
+                return True
+        else: 
+            return False  
+
+    # Checking if a car can move to the bottom of the grid 
+    def can_move_down(self, new_coord, current):
+        if (new_coord.y != current.grid_size):                                            # checking if car is next to the wall 
+            if (not self.is_there_an_obstacle(new_coord, current)):
+                return True
+        else: 
+            return False 
+
+    # Checking if there is already a piece in a certain coordinate in the map -> returns True if car is in the defined coordinate
+    def is_there_an_obstacle(self, cord, map):
+        if (map.grid[cord.y][cord.x] != 'o'): 
+            return True
+        else: 
+            return False 
+
+    # Checking if we found the exit 
+    def goalReached(self, current): 
+        if current.test_win():
+            return True
+        else:  
+            return False      
+
+def pretty_grid(grid): 
+    nl = '\n'
+    for a in grid: 
+        print("".join(a))
+
+def turnGridIntoString(grid):
+    string = ""
+    for a in grid:
+        string += "".join(a)
+    return string
